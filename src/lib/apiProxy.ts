@@ -35,23 +35,34 @@ export async function describeImagesWithVision(images: string[], _userText?: str
   const visionBaseURL = (import.meta.env.VITE_VISION_API_BASE_URL as string) || "https://api.openai.com/v1";
   const visionModel = (import.meta.env.VITE_VISION_MODEL as string) || "gpt-4o-mini";
 
+  const isVolcengine = visionBaseURL.includes("volces.com");
   const contents: any[] = [];
   for (const img of images) {
-    contents.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + img, detail: "low" } });
+    if (isVolcengine) {
+      contents.push({ type: "input_image", image_url: "data:image/jpeg;base64," + img });
+    } else {
+      contents.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + img, detail: "low" } });
+    }
   }
-  contents.push({ type: "text", text: "Describe this camera frame in 1-2 sentences in Chinese. Focus on visible objects, people, actions, and scene layout." });
+  const promptText = "Describe this camera frame in 1-2 sentences in Chinese. Focus on visible objects, people, actions, and scene layout.";
+  if (isVolcengine) {
+    contents.push({ type: "input_text", text: promptText });
+  } else {
+    contents.push({ type: "text", text: promptText });
+  }
 
-  const response = await fetch(visionBaseURL + "/chat/completions", {
+  const endpoint = isVolcengine ? "/responses" : "/chat/completions";
+  const body: any = isVolcengine
+    ? { model: visionModel, input: [{ role: "user", content: contents }] }
+    : { model: visionModel, messages: [{ role: "user", content: contents }], max_tokens: 200 };
+
+  const response = await fetch(visionBaseURL + endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": "Bearer " + visionApiKey,
     },
-    body: JSON.stringify({
-      model: visionModel,
-      messages: [{ role: "user", content: contents }],
-      max_tokens: 200,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -61,6 +72,18 @@ export async function describeImagesWithVision(images: string[], _userText?: str
   }
 
   const data = await response.json();
+  if (isVolcengine) {
+    const output = data.output;
+    if (output && Array.isArray(output)) {
+      for (const item of output) {
+        if (item.type === "message" && item.content) {
+          const texts = item.content.filter(function(c: any) { return c.type === "output_text"; }).map(function(c: any) { return c.text; });
+          if (texts.length > 0) return texts.join(" ");
+        }
+      }
+    }
+    return "The user shared a camera frame image.";
+  }
   const description = data.choices?.[0]?.message?.content || "";
   return description.trim() || "The user shared a camera frame image.";
 }
