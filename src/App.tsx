@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionGate } from './components/PermissionGate';
 import { CameraPreview } from './components/CameraPreview';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -23,7 +23,6 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [textInput, setTextInput] = useState('');
-  const [costMode, setCostMode] = useState<CostMode>('balanced');
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +31,7 @@ const App: React.FC = () => {
   const chat = useMultimodalChat();
   const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRecordingRef = useRef(false);
-
+  const latestFrameRef = useRef<string | null>(null);
 
   useEffect(() => { preloadTTSSupport(); }, []);
 
@@ -43,21 +42,22 @@ const App: React.FC = () => {
 
   const startFrameCapture = useCallback(() => {
     if (frameIntervalRef.current) clearInterval(frameIntervalRef.current);
-    const profile = getCostProfile(costMode);
+    const profile = getCostProfile(chat.session.settings.costSaveMode);
     frameIntervalRef.current = setInterval(() => {
       if (!camera.enabled || !camera.videoRef.current) return;
       const motion = camera.checkMotion(profile.motionThreshold);
       if (profile.enableMotionDetect && !motion.hasMotion) return;
-      camera.grabFrame(profile.jpegQuality);
+      latestFrameRef.current = camera.grabFrame(profile.jpegQuality);
     }, profile.frameIntervalMs);
-  }, [camera, costMode]);
+  }, [camera, chat.session.settings.costSaveMode]);
 
   const doSendAndSpeak = useCallback(async (text: string) => {
     setError(null);
     try {
-      const profile = getCostProfile(costMode);
-      const frame = camera.grabFrame(profile.jpegQuality);
-      const aiText = await chat.sendMessage(text, frame ? [frame] : undefined, undefined, costMode);
+      const profile = getCostProfile(chat.session.settings.costSaveMode);
+      const frame = latestFrameRef.current ?? camera.grabFrame(profile.jpegQuality);
+      latestFrameRef.current = null;
+      const aiText = await chat.sendMessage(text, frame ? [frame] : undefined, undefined, chat.session.settings.costSaveMode);
       if (aiText) {
         setIsSpeaking(true);
         const lang = chat.session.settings.language === 'en' ? 'en-US' : 'zh-CN';
@@ -67,7 +67,7 @@ const App: React.FC = () => {
       console.error(err);
       setError(err.message || 'Failed to send message. Check API key and console.');
     }
-  }, [chat, camera, costMode]);
+  }, [chat, camera, chat.session.settings.costSaveMode]);
 
   const handleSendText = useCallback(async () => {
     if (chat.isProcessing) return;
@@ -111,10 +111,10 @@ const App: React.FC = () => {
 
   const handleToggleCostMode = useCallback(() => {
     const modes: CostMode[] = ['off', 'balanced', 'aggressive'];
-    const idx = modes.indexOf(costMode);
-    setCostMode(modes[(idx + 1) % modes.length]!);
-    chat.updateCostMetrics({ currentMode: modes[(idx + 1) % modes.length]! });
-  }, [costMode, chat]);
+    const idx = modes.indexOf(chat.session.settings.costSaveMode);
+    const next = modes[(idx + 1) % modes.length]!;
+    chat.updateSettings({ costSaveMode: next });
+  }, [chat.session.settings.costSaveMode, chat]);
 
   const handleSleep = useCallback(() => { camera.stopCamera(); mic.stopMicrophone(); setPhase('permission'); }, [camera, mic]);
 
@@ -127,15 +127,15 @@ const App: React.FC = () => {
   useEffect(() => {
     if (phase === 'chat' && camera.enabled) startFrameCapture();
     return () => { if (frameIntervalRef.current) clearInterval(frameIntervalRef.current); };
-  }, [phase, camera.enabled, costMode, startFrameCapture]);
+  }, [phase, camera.enabled, chat.session.settings.costSaveMode, startFrameCapture]);
 
   useEffect(() => {
     if (phase === 'chat') {
-      const profile = getCostProfile(costMode);
+      const profile = getCostProfile(chat.session.settings.costSaveMode);
       if (profile.enableAutoSleep) setIdleConfig(profile.autoSleepMinutes, handleSleep);
     }
     return () => clearIdleTimer();
-  }, [phase, costMode, handleSleep]);
+  }, [phase, chat.session.settings.costSaveMode, handleSleep]);
 
   useEffect(() => { setInterruptHandler(() => setIsSpeaking(false)); return () => clearInterruptHandler(); }, []);
 
@@ -143,7 +143,7 @@ const App: React.FC = () => {
     return <PermissionGate onGrant={handleGrant} cameraError={camera.error} micError={mic.error} />;
   }
 
-  const profile = getCostProfile(costMode);
+  const profile = getCostProfile(chat.session.settings.costSaveMode);
 
   return (
     <div className="flex flex-col h-full bg-gray-950">
@@ -195,7 +195,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2">
               <div className={'w-2 h-2 rounded-full ' + (networkQuality === 'good' ? 'bg-green-500' : networkQuality === 'moderate' ? 'bg-yellow-500' : 'bg-red-500')} />
               <span className="text-sm text-gray-300">Chat</span>
-              <span className="text-xs text-gray-600">{profile.label} | DeepSeek</span>
+              <span className="text-xs text-gray-600">{profile.label} | Doubao</span>
             </div>
             <button onClick={chat.clearSession} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-gray-800">Clear</button>
           </div>
@@ -209,7 +209,12 @@ const App: React.FC = () => {
         onToggleSettings={() => setShowSettings(true)} onToggleCostMode={handleToggleCostMode} />
       <SettingsPanel settings={chat.session.settings} visible={showSettings}
         onClose={() => setShowSettings(false)}
-        onUpdate={(updates) => { chat.updateSettings(updates); setShowSettings(false); }} />
+        onUpdate={(updates) => {
+          chat.updateSettings(updates);
+          if (updates.cameraResolution && updates.cameraResolution !== camera.resolution) {
+            camera.switchResolution(updates.cameraResolution);
+          }
+        }} />
     </div>
   );
 };

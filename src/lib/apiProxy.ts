@@ -1,14 +1,11 @@
-import { getCostProfile } from './costConfig';
 import type { Message, ChatRequestOptions, APIConfig, CostMode } from '../types';
 
-export function getAPIConfig(costMode: CostMode): APIConfig {
-  const profile = getCostProfile(costMode);
-  const model = profile.useMiniModel
-    ? (import.meta.env.VITE_MODEL as string) ?? 'deepseek-chat'
-    : (import.meta.env.VITE_MODEL as string) ?? 'deepseek-chat';
+export function getAPIConfig(_costMode?: CostMode): APIConfig {
+  const model = (import.meta.env.VITE_MODEL as string) || 'doubao-seed-2-0-pro-260215';
+  const baseURL = (import.meta.env.VITE_API_BASE_URL as string) || 'https://ark.cn-beijing.volces.com/api/v3';
   return {
-    apiKey: import.meta.env.VITE_DEEPSEEK_API_KEY as string,
-    baseURL: (import.meta.env.VITE_API_BASE_URL as string) || 'https://api.deepseek.com',
+    apiKey: (import.meta.env.VITE_API_KEY as string) || (import.meta.env.VITE_DEEPSEEK_API_KEY as string) || '',
+    baseURL,
     model,
   };
 }
@@ -19,7 +16,7 @@ interface DeepSeekMessage {
 }
 
 export function supportsVision(model: string): boolean {
-  const visionModels = ["gpt-4o", "gpt-4-vision", "gpt-4.1", "claude-3", "gemini-1.5", "gemini-2.0"];
+  const visionModels = ["doubao", "gpt-4o", "gpt-4-vision", "gpt-4.1", "claude-3", "gemini-1.5", "gemini-2.0"];
   return visionModels.some(function(vm) { return model.toLowerCase().includes(vm.toLowerCase()); });
 }
 
@@ -131,13 +128,16 @@ export async function* streamChat(
 ): AsyncGenerator<string, { fullText: string; model: string; usage: { prompt: number; completion: number } | null }> {
   const apiConfig = getAPIConfig(options.costMode ?? 'balanced');
   const apiKey = apiConfig.apiKey;
-  if (!apiKey || apiKey === 'sk-your-deepseek-key-here') {
-    throw new Error('Please set VITE_DEEPSEEK_API_KEY in .env');
+  if (!apiKey) {
+    throw new Error('Please set VITE_API_KEY in .env');
   }
 
-  const deepSeekMessages = buildMessages(messages, options.images, apiConfig.model);
+  const chatMessages = buildMessages(messages, options.images, apiConfig.model);
 
-  const response = await fetch(apiConfig.baseURL + '/v1/chat/completions', {
+  const isVolcengine = apiConfig.baseURL!.includes('volces.com');
+  const endpoint = isVolcengine ? '/chat/completions' : '/v1/chat/completions';
+
+  const response = await fetch(apiConfig.baseURL! + endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -145,7 +145,7 @@ export async function* streamChat(
     },
     body: JSON.stringify({
       model: apiConfig.model,
-      messages: deepSeekMessages,
+      messages: chatMessages,
       stream: true,
       max_tokens: 512,
     }),
@@ -153,7 +153,7 @@ export async function* streamChat(
 
   if (!response.ok) {
     const errText = await response.text().catch(() => 'unknown error');
-    throw new Error('DeepSeek API error ' + response.status + ': ' + errText);
+    throw new Error('API error ' + response.status + ': ' + errText);
   }
 
   const reader = response.body!.getReader();
@@ -210,6 +210,7 @@ export function estimateCost(promptTokens: number, completionTokens: number, mod
   // DeepSeek pricing (approximate):
   // deepseek-chat: .27/M input tokens, .10/M output tokens
   const rates: Record<string, { input: number; output: number }> = {
+    'doubao-seed-2-0-pro-260215': { input: 0.80 / 1_000_000, output: 2.00 / 1_000_000 },
     'deepseek-chat': { input: 0.27 / 1_000_000, output: 1.10 / 1_000_000 },
     'deepseek-reasoner': { input: 0.55 / 1_000_000, output: 2.19 / 1_000_000 },
   };

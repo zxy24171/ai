@@ -2,7 +2,7 @@ export function buildSystemPrompt(language: string = 'zh'): string {
   const langInstruction = language === 'en'
     ? 'Answer in English.'
     : 'Please answer in Chinese.';
-  return 'You are AI Vision Chat, a real-time AI assistant powered by DeepSeek V4. ' +
+  return 'You are AI Vision Chat, a real-time AI assistant powered by Doubao. ' +
     'You observe the user\'s camera feed through real-time image frames and talk via voice.\n\n' +
     '## Rules\n' +
     '1. Answer naturally based on the camera feed and chat history.\n' +

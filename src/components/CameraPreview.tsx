@@ -4,10 +4,14 @@ import type { CameraResolution } from '../types';
 interface Props { stream: MediaStream | null; videoRef: React.RefObject<HTMLVideoElement | null>; enabled: boolean; resolution: CameraResolution; }
 
 export const CameraPreview: React.FC<Props> = ({ stream, videoRef, enabled, resolution }) => {
-  useEffect(() => { if (videoRef.current && stream) (videoRef as any).current.srcObject = stream; }, [stream, videoRef]);
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream, videoRef]);
 
   return (
-    <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-[4/3]">
+    <div className="bg-gray-900 rounded-xl overflow-hidden aspect-[4/3]">
       {enabled && stream ? (
         <>
           <video ref={videoRef as any} autoPlay playsInline muted className="w-full h-full object-cover" />

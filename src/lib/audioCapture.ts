@@ -1,4 +1,6 @@
-let mediaRecorder: MediaRecorder | null = null;
+// NOTE: This module is currently unused in the app (push-to-talk uses Web Speech API).
+// Kept for future use if switching to MediaRecorder-based audio capture.
+﻿let mediaRecorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
 
 export function startRecording(stream: MediaStream): void {
