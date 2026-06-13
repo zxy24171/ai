@@ -1,55 +1,65 @@
-let recognition: any = null;
-let isListening = false;
-let resolveCurrent: ((text: string) => void) | null = null;
-let rejectCurrent: ((err: Error) => void) | null = null;
+﻿let isListening = false;
+let currentRecognition: any = null;
+let latestTranscript = "";
 
-export async function speechToText(_audioBlob: Blob): Promise<string> {
-  // For push-to-talk: use browser SpeechRecognition for live transcription
-  // Since we have the blob, we use the recognition API in a fresh instance
-  throw new Error('Use startSTT / stopSTT for browser-based STT');
-}
+export function startSTT(_micStream?: MediaStream): Promise<string> {
+  if (isListening) return Promise.resolve("");
 
-export function startSTT(language: string = 'zh-CN'): Promise<string> {
-  return new Promise((resolve, reject) => {
+  isListening = true;
+  latestTranscript = "";
+
+  return new Promise<string>((resolve) => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      reject(new Error('Speech recognition not supported in this browser'));
+      isListening = false;
+      resolve("");
       return;
     }
 
-    recognition = new SpeechRecognition();
-    recognition.lang = language;
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
+    try {
+      const recognition = new SpeechRecognition();
+      currentRecognition = recognition;
+      recognition.lang = "zh-CN";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
 
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      resolveCurrent?.(transcript);
-    };
+      recognition.onresult = (event: any) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            latestTranscript = transcript;
+          } else {
+            latestTranscript = transcript;
+          }
+        }
+      };
 
-    recognition.onerror = (event: any) => {
-      rejectCurrent?.(new Error('Speech recognition error: ' + event.error));
-    };
+      recognition.onerror = () => {
+        // network error or others - resolve with empty, no error shown
+      };
 
-    recognition.onend = () => {
+      recognition.onend = () => {
+        isListening = false;
+        currentRecognition = null;
+        resolve(latestTranscript);
+      };
+
+      recognition.start();
+    } catch (e) {
       isListening = false;
-    };
-
-    resolveCurrent = resolve;
-    rejectCurrent = reject;
-    isListening = true;
-    recognition.start();
+      resolve("");
+    }
   });
 }
 
 export function stopSTT(): void {
-  if (recognition && isListening) {
-    recognition.stop();
-    isListening = false;
+  if (currentRecognition) {
+    try {
+      currentRecognition.stop();
+    } catch {}
+    currentRecognition = null;
   }
-  resolveCurrent = null;
-  rejectCurrent = null;
 }
 
 export function getIsSTTListening(): boolean { return isListening; }

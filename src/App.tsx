@@ -88,23 +88,24 @@ const App: React.FC = () => {
     if (!isRecordingRef.current) return;
     setIsRecording(false);
     isRecordingRef.current = false;
+    stopSTT();
   }, []);
 
   useEffect(() => {
     if (!isRecording) return;
-    const lang = chat.session.settings.language === 'en' ? 'en-US' : 'zh-CN';
-    startSTT(lang)
+    startSTT()
       .then(async (text) => {
         if (text.trim()) {
           await doSendAndSpeak(text.trim());
         }
       })
       .catch((err) => {
-        console.error('STT error:', err);
-        setError('Speech recognition: ' + err.message);
+        console.error('STT error:', err.message || err);
+        if (err.message && !err.message.includes('No speech detected') && !err.message.includes('network')) {
+          setError('Speech recognition: ' + err.message);
+        }
       });
-    return () => { stopSTT(); };
-  }, [isRecording, doSendAndSpeak, chat.session.settings.language]);
+  }, [isRecording, doSendAndSpeak]);
 
   const handleToggleCamera = useCallback(() => { camera.enabled ? camera.stopCamera() : camera.startCamera(); }, [camera]);
   const handleToggleMic = useCallback(() => { mic.enabled ? mic.stopMicrophone() : mic.startMicrophone(); }, [mic]);
