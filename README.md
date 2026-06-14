@@ -4,7 +4,7 @@ A real-time AI conversation app that runs entirely in the browser. Uses your cam
 
 **Live demo:** [https://zxy24171.github.io/ai/](https://zxy24171.github.io/ai/)
 
-**Demo 视频:** [百度网盘](https://pan.baidu.com/s/1wnf20fNUNXG0rkH952Nukw) 提取码: 872y
+**Demo 视频:** [百度网盘](https://pan.baidu.com/s/1CXnmrCupRsjDvPt2sCDizQ) 提取码: hgqj
 
 ## Features
 
