@@ -1,4 +1,4 @@
-﻿import type { Message, ChatRequestOptions, APIConfig, CostMode } from '../types';
+import type { Message, ChatRequestOptions, APIConfig, CostMode } from '../types';
 
 export function getAPIConfig(_costMode?: CostMode): APIConfig {
   const model = (import.meta.env.VITE_MODEL as string) || 'doubao-seed-2-0-pro-260215';
