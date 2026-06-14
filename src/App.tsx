@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionGate } from './components/PermissionGate';
 import { CameraPreview } from './components/CameraPreview';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -17,6 +17,23 @@ import { getNetworkState, onNetworkChange } from './lib/networkDetect';
 import type { NetworkQuality } from './lib/networkDetect';
 import type { CostMode } from './types';
 
+const ERR_401 = 'API Key 无效或已过期，请检查 .env 配置';
+const ERR_NETWORK = '网络连接失败，请检查网络后重试';
+const ERR_TIMEOUT = '请求超时，请检查网络连接';
+const ERR_DEFAULT = '操作失败，请重试';
+
+function friendlyError(err: any): string {
+  const msg: string = err?.message || err?.error?.message || String(err || '');
+  if (!msg || msg === 'unknown' || msg === '[object Object]') return ERR_DEFAULT;
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) return ERR_NETWORK;
+  if (msg.includes('401') || msg.includes('API key') || msg.includes('api key') || msg.includes('ApiKey') || msg.includes('API Key')) return ERR_401;
+  if (msg.includes('402')) return 'API 余额不足，请充值';
+  if (msg.includes('403')) return '权限不足，请检查 API Key';
+  if (msg.includes('429')) return '请求过于频繁，请稍后重试';
+  if (msg.includes('timeout') || msg.includes('Timeout') || msg.includes('timed out')) return ERR_TIMEOUT;
+  return msg.length > 80 ? msg.slice(0, 80) + '...' : msg;
+}
+
 const App: React.FC = () => {
   const [phase, setPhase] = useState<'permission' | 'chat'>('permission');
   const [networkQuality, setNetworkQuality] = useState<NetworkQuality>('good');
@@ -32,12 +49,17 @@ const App: React.FC = () => {
   const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRecordingRef = useRef(false);
   const latestFrameRef = useRef<string | null>(null);
+  const sttSessionRef = useRef(0);
+  const sttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { preloadTTSSupport(); }, []);
 
   const handleGrant = useCallback(async () => {
-    await Promise.all([camera.startCamera(), mic.startMicrophone()]);
-    setPhase('chat');
+    setError(null);
+    try {
+      await Promise.all([camera.startCamera(), mic.startMicrophone()]);
+      setPhase('chat');
+    } catch (err: any) { setError(friendlyError(err)); }
   }, [camera, mic]);
 
   const startFrameCapture = useCallback(() => {
@@ -63,10 +85,7 @@ const App: React.FC = () => {
         const lang = chat.session.settings.language === 'en' ? 'en-US' : 'zh-CN';
         await textToSpeech(aiText, lang, undefined, () => setIsSpeaking(false));
       }
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Failed to send message. Check API key and console.');
-    }
+    } catch (err: any) { console.error(err); setError(friendlyError(err)); }
   }, [chat, camera, chat.session.settings.costSaveMode]);
 
   const handleSendText = useCallback(async () => {
@@ -77,46 +96,45 @@ const App: React.FC = () => {
     await doSendAndSpeak(content);
   }, [chat.isProcessing, textInput, doSendAndSpeak]);
 
+  // Voice: sync startSTT, session guard, 400ms delay, 12s timeout
   const handleVoiceStart = useCallback(() => {
-    if (isRecording) return;
-    cancelTTS();
-    setIsRecording(true);
-    isRecordingRef.current = true;
-  }, [isRecording]);
+    if (isRecordingRef.current) return;
+    setError(null); cancelTTS();
+    setIsRecording(true); isRecordingRef.current = true;
+    const session = ++sttSessionRef.current;
+    if (sttTimeoutRef.current) clearTimeout(sttTimeoutRef.current);
+    sttTimeoutRef.current = setTimeout(() => {
+      if (session === sttSessionRef.current && isRecordingRef.current) {
+        setIsRecording(false); isRecordingRef.current = false; stopSTT();
+        setError('听不到声音，请检查麦克风是否正常');
+      }
+    }, 12000);
+    startSTT().then((text) => {
+      if (session !== sttSessionRef.current) return;
+      if (sttTimeoutRef.current) { clearTimeout(sttTimeoutRef.current); sttTimeoutRef.current = null; }
+      if (text.trim()) doSendAndSpeak(text.trim());
+    }).catch((err) => {
+      if (session !== sttSessionRef.current) return;
+      if (sttTimeoutRef.current) { clearTimeout(sttTimeoutRef.current); sttTimeoutRef.current = null; }
+      setError(friendlyError(err));
+    });
+  }, [doSendAndSpeak]);
 
-  const handleVoiceEnd = useCallback(async () => {
+  const handleVoiceEnd = useCallback(() => {
     if (!isRecordingRef.current) return;
-    setIsRecording(false);
-    isRecordingRef.current = false;
-    stopSTT();
+    setIsRecording(false); isRecordingRef.current = false;
+    if (sttTimeoutRef.current) { clearTimeout(sttTimeoutRef.current); sttTimeoutRef.current = null; }
+    setTimeout(() => { stopSTT(); }, 400);
   }, []);
-
-  useEffect(() => {
-    if (!isRecording) return;
-    startSTT()
-      .then(async (text) => {
-        if (text.trim()) {
-          await doSendAndSpeak(text.trim());
-        }
-      })
-      .catch((err) => {
-        console.error('STT error:', err.message || err);
-        if (err.message && !err.message.includes('No speech detected') && !err.message.includes('network')) {
-          setError('Speech recognition: ' + err.message);
-        }
-      });
-  }, [isRecording, doSendAndSpeak]);
 
   const handleToggleCamera = useCallback(() => { camera.enabled ? camera.stopCamera() : camera.startCamera(); }, [camera]);
   const handleToggleMic = useCallback(() => { mic.enabled ? mic.stopMicrophone() : mic.startMicrophone(); }, [mic]);
-
   const handleToggleCostMode = useCallback(() => {
     const modes: CostMode[] = ['off', 'balanced', 'aggressive'];
     const idx = modes.indexOf(chat.session.settings.costSaveMode);
     const next = modes[(idx + 1) % modes.length]!;
     chat.updateSettings({ costSaveMode: next });
   }, [chat.session.settings.costSaveMode, chat]);
-
   const handleSleep = useCallback(() => { camera.stopCamera(); mic.stopMicrophone(); setPhase('permission'); }, [camera, mic]);
 
   useEffect(() => {
@@ -140,9 +158,7 @@ const App: React.FC = () => {
 
   useEffect(() => { setInterruptHandler(() => setIsSpeaking(false)); return () => clearInterruptHandler(); }, []);
 
-  if (phase === 'permission') {
-    return <PermissionGate onGrant={handleGrant} cameraError={camera.error} micError={mic.error} />;
-  }
+  if (phase === 'permission') return <PermissionGate onGrant={handleGrant} cameraError={camera.error} micError={mic.error} />;
 
   const profile = getCostProfile(chat.session.settings.costSaveMode);
 
@@ -153,30 +169,23 @@ const App: React.FC = () => {
         <div className="w-full md:w-80 lg:w-96 flex-shrink-0 p-4 pb-2 md:pb-4 flex flex-col">
           <CameraPreview stream={camera.stream} videoRef={camera.videoRef} enabled={camera.enabled} resolution={camera.resolution} />
           <div className="mt-3 flex justify-center">
-            <button
-              onMouseDown={handleVoiceStart}
-              onMouseUp={handleVoiceEnd}
+            <button onMouseDown={handleVoiceStart} onMouseUp={handleVoiceEnd}
               onMouseLeave={() => { if (isRecordingRef.current) handleVoiceEnd(); }}
-              onTouchStart={handleVoiceStart}
-              onTouchEnd={handleVoiceEnd}
-              className={
-                'w-16 h-16 rounded-full flex items-center justify-center transition-all ' +
-                (isRecording ? 'bg-red-600 scale-110 shadow-lg shadow-red-600/30' : 'bg-gray-800 hover:bg-gray-700 hover:scale-105')
-              }
-              disabled={!mic.enabled}
-            >
+              onTouchStart={handleVoiceStart} onTouchEnd={handleVoiceEnd}
+              className={'w-16 h-16 rounded-full flex items-center justify-center transition-all ' + (isRecording ? 'bg-red-600 scale-110 shadow-lg shadow-red-600/30' : 'bg-gray-800 hover:bg-gray-700 hover:scale-105')}
+              disabled={!mic.enabled}>
               <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
             </button>
           </div>
           <p className="text-center text-xs text-gray-500 mt-2">
-            {!mic.enabled ? 'Mic off' : isRecording ? 'Release to send' : 'Hold to speak'}
+            {!mic.enabled ? '麦克风已关闭' : isRecording ? '松开发送' : '按住说话'}
           </p>
           <div className="mt-3 flex gap-2">
             <input type="text" value={textInput} onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSendText(); }}
-              placeholder="Type a message..." disabled={chat.isProcessing}
+              placeholder="输入消息..." disabled={chat.isProcessing}
               className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:border-blue-500 placeholder-gray-500" />
             <button onClick={handleSendText} disabled={chat.isProcessing || !textInput.trim()}
               className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors">
@@ -187,7 +196,7 @@ const App: React.FC = () => {
           </div>
           {error && (
             <div className="mt-2 p-2 bg-red-900/40 border border-red-700 rounded-lg text-xs text-red-300">
-              {error}
+              <span className="font-medium mr-1">错误:</span>{error}
             </div>
           )}
         </div>
@@ -195,27 +204,20 @@ const App: React.FC = () => {
           <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className={'w-2 h-2 rounded-full ' + (networkQuality === 'good' ? 'bg-green-500' : networkQuality === 'moderate' ? 'bg-yellow-500' : 'bg-red-500')} />
-              <span className="text-sm text-gray-300">Chat</span>
-              <span className="text-xs text-gray-600">{profile.label} | Doubao</span>
+              <span className="text-sm text-gray-300">聊天</span>
+              <span className="text-xs text-gray-600">{profile.label} | 豆包</span>
             </div>
-            <button onClick={chat.clearSession} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-gray-800">Clear</button>
+            <button onClick={chat.clearSession} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-gray-800">清空</button>
           </div>
           <ChatMessageList messages={chat.messages} streamingText={chat.streamingText} isProcessing={chat.isProcessing} />
         </div>
       </div>
-      <StatusBar
-        cameraEnabled={camera.enabled} micEnabled={mic.enabled} isRecording={isRecording}
-        isSpeaking={isSpeaking} isProcessing={chat.isProcessing} costMetrics={chat.costMetrics}
+      <StatusBar cameraEnabled={camera.enabled} micEnabled={mic.enabled} isRecording={isRecording} isSpeaking={isSpeaking}
+        isProcessing={chat.isProcessing} costMetrics={chat.costMetrics}
         onToggleCamera={handleToggleCamera} onToggleMic={handleToggleMic}
         onToggleSettings={() => setShowSettings(true)} onToggleCostMode={handleToggleCostMode} />
-      <SettingsPanel settings={chat.session.settings} visible={showSettings}
-        onClose={() => setShowSettings(false)}
-        onUpdate={(updates) => {
-          chat.updateSettings(updates);
-          if (updates.cameraResolution && updates.cameraResolution !== camera.resolution) {
-            camera.switchResolution(updates.cameraResolution);
-          }
-        }} />
+      <SettingsPanel settings={chat.session.settings} visible={showSettings} onClose={() => setShowSettings(false)}
+        onUpdate={(updates) => { chat.updateSettings(updates); if (updates.cameraResolution && updates.cameraResolution !== camera.resolution) camera.switchResolution(updates.cameraResolution); }} />
     </div>
   );
 };
