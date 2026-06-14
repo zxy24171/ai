@@ -2,6 +2,24 @@
 let currentRecognition: any = null;
 let latestTranscript = "";
 
+/** Pre-warm the SpeechRecognition API so first real use doesn't cold-start */
+export function preloadSTT(): void {
+  if (typeof window === "undefined") return;
+  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  if (!SpeechRecognition) return;
+  try {
+    const recognition = new SpeechRecognition();
+    recognition.lang = "zh-CN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    // Swallow all events, just create and cleanup to prime the API
+    recognition.onerror = () => {};
+    recognition.start();
+    setTimeout(() => { try { recognition.stop(); } catch {} }, 100);
+  } catch {}
+}
+
 export function startSTT(_micStream?: MediaStream): Promise<string> {
   if (isListening) return Promise.resolve("");
 
@@ -36,10 +54,15 @@ export function startSTT(_micStream?: MediaStream): Promise<string> {
       };
 
       recognition.onerror = () => {
-        // network error or others - resolve with empty, no error shown
+        // Ensure promise always resolves even if onend doesn't fire
+        const transcript = latestTranscript;
+        isListening = false;
+        currentRecognition = null;
+        resolve(transcript);
       };
 
       recognition.onend = () => {
+        // Ignore if already resolved by onerror
         isListening = false;
         currentRecognition = null;
         resolve(latestTranscript);
