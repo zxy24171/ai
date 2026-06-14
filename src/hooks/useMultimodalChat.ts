@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+﻿import { useCallback, useState } from 'react';
 import { streamChat, estimateCost, getAPIConfig, supportsVision, isVisionConfigured, describeImagesWithVision } from '../lib/apiProxy';
 import { buildSystemPrompt } from '../lib/promptTemplates';
 import { interruptSpeech } from '../lib/speechInterrupt';
@@ -14,7 +14,8 @@ export function useMultimodalChat() {
   const [streamingText, setStreamingText] = useState("");
 
   const sendMessage = useCallback(async (
-    text: string, images?: string[], _audioBlob?: Blob, costMode: CostMode = "balanced"
+    text: string, images?: string[], _audioBlob?: Blob, costMode: CostMode = "balanced",
+    retryCount: number = 0
   ): Promise<string | undefined> => {
     if (isProcessing) return;
     setIsProcessing(true);
@@ -25,13 +26,13 @@ export function useMultimodalChat() {
     const modelCanSee = supportsVision(apiConfig.model);
     const visionAvailable = isVisionConfigured();
 
-    // If model can't see but vision API is configured, describe images via proxy
-    let visionDescription = "";
+    // Non-vision model path: describe images with a separate vision API
     if (images && images.length > 0 && !modelCanSee && visionAvailable) {
-      visionDescription = await describeImagesWithVision(images, text);
+      const visionDescription = await describeImagesWithVision(images, text);
       addMessage({ role: "user", content: text + "\n\n[Camera view: " + visionDescription + "]", images: undefined });
     } else {
-      addMessage({ role: "user", content: text, images: modelCanSee ? images : undefined });
+      // Always store images in message for UI history display
+      addMessage({ role: "user", content: text, images: images && images.length > 0 ? images : undefined });
     }
 
     const profile = getCostProfile(costMode);
@@ -41,14 +42,9 @@ export function useMultimodalChat() {
       if (filteredImages && filteredImages.length === 0) filteredImages = undefined;
     }
 
-    try {
+    const doAPIRequest = async (): Promise<string> => {
       const systemPrompt = buildSystemPrompt(session.settings.language);
-      const enhancedPrompt = visionDescription && !modelCanSee
-        ? systemPrompt + "\n\nCurrent camera view: " + visionDescription
-        : systemPrompt;
-      const systemMsg: Message = { id: "system", role: "system", content: enhancedPrompt, timestamp: 0 };
-
-      // Trim history to maxHistoryRounds
+      const systemMsg: Message = { id: "system", role: "system", content: systemPrompt, timestamp: 0 };
       const maxKeep = profile.maxHistoryRounds * 2;
       const recentMessages = maxKeep > 0 && session.messages.length > maxKeep
         ? session.messages.slice(-maxKeep)
@@ -59,6 +55,7 @@ export function useMultimodalChat() {
       let resultModel = "";
       let resultUsage: { prompt: number; completion: number } | null = null;
 
+      // Always send images to the vision model
       const gen = streamChat(chatMessages, { images: modelCanSee ? filteredImages : undefined, costMode });
       for await (const delta of gen) { fullText += delta; setStreamingText(fullText); }
       const finalResult = await gen.return(undefined as any);
@@ -71,9 +68,20 @@ export function useMultimodalChat() {
         updateTokenUsage((resultUsage?.prompt ?? 0) + (resultUsage?.completion ?? 0), tokenCost);
       }
 
+      return fullText;
+    };
+
+    try {
+      let result = await doAPIRequest();
+
+      if (!result && retryCount < 1) {
+        console.warn("[Chat] Empty response, retrying once...");
+        result = await doAPIRequest();
+      }
+
       setStreamingText("");
       setIsProcessing(false);
-      return fullText;
+      return result;
     } catch (err: any) {
       console.error("Chat error:", err);
       setIsProcessing(false);
