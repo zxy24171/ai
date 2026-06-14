@@ -1,6 +1,8 @@
-# AI Vision Chat
+﻿# AI Vision Chat
 
 A real-time AI conversation app that runs entirely in the browser. Uses your camera and microphone for face-to-face voice conversation with an AI assistant powered by Doubao (volcano engine).
+
+**Live demo:** [https://zxy24171.github.io/ai/](https://zxy24171.github.io/ai/)
 
 ## Features
 
@@ -9,10 +11,18 @@ A real-time AI conversation app that runs entirely in the browser. Uses your cam
 - **Text input** — Type messages as an alternative
 - **Full Chinese UI** — All labels, buttons, and messages in Chinese
 - **Multi-modal AI** — Text + image understanding via Doubao API
+- **Two-message structure** — Question text and camera frame sent as separate messages to prevent AI from prioritizing images over conversation
+- **Automatic retry** — Retries on empty API response to handle intermittent failures
+- **API timeout** — 15-second timeout prevents hanging requests
+- **API warmup** — Pre-warms the API connection on app start
+- **STT/TTS warmup** — Preloads SpeechRecognition and SpeechSynthesis to avoid cold-start latency
 - **Cost control** — Three modes (Off / Balanced / Eco) to manage API usage
 - **Conversation history** — Scrollable chat log with auto-scroll
+- **Motion detection** — Only sends frames when the scene changes
+- **Frame deduplication** — Skips duplicate frames to save tokens
 - **Auto-sleep** — Releases camera/mic after inactivity
 - **Offline detection** — Warning when network is lost
+- **Usage dashboard** — Real-time token and cost display
 - **Friendly errors** — HTTP errors mapped to human-readable Chinese hints
 
 ## Tech Stack
@@ -27,6 +37,7 @@ A real-time AI conversation app that runs entirely in the browser. Uses your cam
 | Text-to-Speech | Browser Web Speech API (SpeechSynthesis) |
 | Voice Detection | Browser energy-threshold VAD |
 | Video Processing | WebRTC getUserMedia + Canvas frame capture |
+| Deployment | GitHub Pages |
 
 ### Dependencies
 
@@ -39,8 +50,8 @@ No external AI SDKs or audio processing libraries required — everything uses b
 All source code is original. Key original modules:
 - Custom React hooks for camera, microphone, session, multimodal chat
 - Real-time frame capture with motion detection and deduplication
-- Browser-native STT/TTS integration
-- Manual API proxy for streaming chat completions
+- Browser-native STT/TTS integration with warmup and retry
+- Manual API proxy for streaming chat completions with timeout handling
 - Cost management with dynamic frame rate / resolution control
 
 ## Setup
@@ -50,10 +61,10 @@ All source code is original. Key original modules:
 3. Fill in your Doubao API credentials
 4. Run:
 
-`ash
+```bash
 npm install
 npm run dev
-`
+```
 
 5. Open http://localhost:3001
 
@@ -81,7 +92,7 @@ npm run dev
 
 ## Project Structure
 
-`
+```
 src/
   components/    — React UI components
   hooks/         — Custom React hooks
@@ -89,7 +100,7 @@ src/
   types/         — TypeScript type definitions
   App.tsx        — Main application component
   main.tsx       — Entry point
-`
+```
 
 ## License
 

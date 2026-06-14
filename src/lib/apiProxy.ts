@@ -1,4 +1,4 @@
-import type { Message, ChatRequestOptions, APIConfig, CostMode } from '../types';
+﻿import type { Message, ChatRequestOptions, APIConfig, CostMode } from '../types';
 
 export function getAPIConfig(_costMode?: CostMode): APIConfig {
   const model = (import.meta.env.VITE_MODEL as string) || 'doubao-seed-2-0-pro-260215';
@@ -92,32 +92,31 @@ function buildMessages(messages: Message[], latestImages?: string[], model?: str
     if (msg.role === "system") {
       result.push({ role: "system", content: msg.content });
     } else if (msg.role === "user") {
-      const hasImages = msg.images && msg.images.length > 0;
-      if (hasImages && canSee) {
-        const parts: DeepSeekMessage["content"] = [];
-        for (const img of msg.images!) {
-          parts.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + img, detail: "low" } });
-        }
-        parts.push({ type: "text", text: msg.content });
-        result.push({ role: "user", content: parts });
-      } else {
-        result.push({ role: "user", content: msg.content });
-      }
+      // Text-only in history messages; current frame images attached separately below
+      result.push({ role: "user", content: msg.content });
     } else {
       result.push({ role: "assistant", content: msg.content });
     }
   }
-  if (latestImages && latestImages.length > 0) {
-    if (canSee) {
-      const parts: DeepSeekMessage["content"] = [];
+  // When images are present, use a TWO-MESSAGE structure:
+  //   1. Pure text user message (the question, no images attached)
+  //   2. Separate context message with images
+  // This ensures the model reads and responds to the question text FIRST,
+  // before seeing any images. The images are available as reference context.
+  if (latestImages && latestImages.length > 0 && canSee && result.length > 0) {
+    const last = result[result.length - 1]!;
+    if (last.role === "user" && typeof last.content === "string") {
+      // Keep the last user message as pure text (the question)
+      // (already done in the loop above)
+      // Add a separate message with images as background context
+      const imgParts: DeepSeekMessage["content"] = [
+        { type: "text", text: "(Camera feed - background reference)" },
+      ];
       for (const img of latestImages) {
-        parts.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + img, detail: "low" } });
+        imgParts.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + img, detail: "low" } });
       }
-      parts.push({ type: "text", text: "(current camera frame)" });
-      result.push({ role: "user", content: parts });
+      result.push({ role: "user", content: imgParts });
     }
-    // For non-vision models, images are handled BEFORE calling streamChat
-    // via describeImagesWithVision - the description is injected as context text
   }
   return result;
 }
@@ -137,6 +136,8 @@ export async function* streamChat(
   const isVolcengine = apiConfig.baseURL!.includes('volces.com');
   const endpoint = isVolcengine ? '/chat/completions' : '/v1/chat/completions';
 
+  console.log('[API] Sending to ' + apiConfig.baseURL + endpoint + ' model=' + apiConfig.model + ' messages=' + chatMessages.length);
+  console.log('[API] Last user message:', JSON.stringify(chatMessages[chatMessages.length - 1]).slice(0, 300));
   const response = await fetch(apiConfig.baseURL! + endpoint, {
     method: 'POST',
     headers: {
@@ -149,6 +150,7 @@ export async function* streamChat(
       stream: true,
       max_tokens: 512,
     }),
+    signal: AbortSignal.timeout(15000),
   });
 
   if (!response.ok) {
@@ -206,6 +208,31 @@ export async function synthesizeSpeech(_text: string, _costMode?: CostMode): Pro
   throw new Error('TTS via Web Speech API - use textToSpeechBrowser instead');
 }
 
+/** Pre-warm the API connection + model so first real request doesn't cold-start */
+export async function warmupAPI(): Promise<void> {
+  const apiConfig = getAPIConfig('balanced');
+  if (!apiConfig.apiKey) return;
+  const isVolcengine = apiConfig.baseURL!.includes('volces.com');
+  const endpoint = isVolcengine ? '/chat/completions' : '/v1/chat/completions';
+  try {
+    const resp = await fetch(apiConfig.baseURL! + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiConfig.apiKey },
+      body: JSON.stringify({
+        model: apiConfig.model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    // Just consume the response to warm up the connection
+    await resp.text();
+    console.log('[API] Warmup complete');
+  } catch {
+    // Silently ignore warmup failures
+  }
+}
 export function estimateCost(promptTokens: number, completionTokens: number, model: string): number {
   // DeepSeek pricing (approximate):
   // deepseek-chat: .27/M input tokens, .10/M output tokens

@@ -5,12 +5,14 @@ import { ChatMessageList } from './components/ChatMessageList';
 import { StatusBar } from './components/StatusBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { OfflineNotice } from './components/OfflineNotice';
+import { CostDashboard } from './components/CostDashboard';
 import { useCamera } from './hooks/useCamera';
 import { useMicrophone } from './hooks/useMicrophone';
 import { useMultimodalChat } from './hooks/useMultimodalChat';
+import { warmupAPI } from './lib/apiProxy';
 import { getCostProfile } from './lib/costConfig';
 import { textToSpeech, cancelTTS, preloadTTSSupport } from './lib/ttsService';
-import { startSTT, stopSTT } from './lib/sttService';
+import { startSTT, stopSTT, preloadSTT } from './lib/sttService';
 import { setInterruptHandler, clearInterruptHandler } from './lib/speechInterrupt';
 import { setIdleConfig, clearIdleTimer } from './lib/autoSleep';
 import { getNetworkState, onNetworkChange } from './lib/networkDetect';
@@ -52,12 +54,13 @@ const App: React.FC = () => {
   const sttSessionRef = useRef(0);
   const sttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => { preloadTTSSupport(); }, []);
+  useEffect(() => { preloadTTSSupport(); preloadSTT(); }, []);
 
   const handleGrant = useCallback(async () => {
     setError(null);
     try {
       await Promise.all([camera.startCamera(), mic.startMicrophone()]);
+      warmupAPI(); // Pre-warm API connection
       setPhase('chat');
     } catch (err: any) { setError(friendlyError(err)); }
   }, [camera, mic]);
@@ -84,6 +87,8 @@ const App: React.FC = () => {
         setIsSpeaking(true);
         const lang = chat.session.settings.language === 'en' ? 'en-US' : 'zh-CN';
         await textToSpeech(aiText, lang, undefined, () => setIsSpeaking(false));
+      } else {
+        setError('AI 暂时无法回应，请重试');
       }
     } catch (err: any) { console.error(err); setError(friendlyError(err)); }
   }, [chat, camera, chat.session.settings.costSaveMode]);
@@ -112,7 +117,11 @@ const App: React.FC = () => {
     startSTT().then((text) => {
       if (session !== sttSessionRef.current) return;
       if (sttTimeoutRef.current) { clearTimeout(sttTimeoutRef.current); sttTimeoutRef.current = null; }
-      if (text.trim()) doSendAndSpeak(text.trim());
+      if (text.trim()) {
+        doSendAndSpeak(text.trim());
+      } else {
+        setError('没听到声音，请再说一遍');
+      }
     }).catch((err) => {
       if (session !== sttSessionRef.current) return;
       if (sttTimeoutRef.current) { clearTimeout(sttTimeoutRef.current); sttTimeoutRef.current = null; }
@@ -124,7 +133,7 @@ const App: React.FC = () => {
     if (!isRecordingRef.current) return;
     setIsRecording(false); isRecordingRef.current = false;
     if (sttTimeoutRef.current) { clearTimeout(sttTimeoutRef.current); sttTimeoutRef.current = null; }
-    setTimeout(() => { stopSTT(); }, 400);
+    setTimeout(() => { stopSTT(); }, 800);
   }, []);
 
   const handleToggleCamera = useCallback(() => { camera.enabled ? camera.stopCamera() : camera.startCamera(); }, [camera]);
@@ -199,6 +208,9 @@ const App: React.FC = () => {
               <span className="font-medium mr-1">错误:</span>{error}
             </div>
           )}
+          <div className="mt-2">
+            <CostDashboard costMetrics={chat.costMetrics} />
+          </div>
         </div>
         <div className="flex-1 flex flex-col min-h-0 border-l border-gray-800">
           <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
