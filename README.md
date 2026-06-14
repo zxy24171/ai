@@ -22,7 +22,6 @@ A real-time AI conversation app that runs entirely in the browser. Uses your cam
 - **Frame deduplication** — Skips duplicate frames to save tokens
 - **Auto-sleep** — Releases camera/mic after inactivity
 - **Offline detection** — Warning when network is lost
-- **Usage dashboard** — Real-time token and cost display
 - **Friendly errors** — HTTP errors mapped to human-readable Chinese hints
 
 ## Tech Stack

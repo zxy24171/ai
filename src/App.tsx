@@ -5,7 +5,6 @@ import { ChatMessageList } from './components/ChatMessageList';
 import { StatusBar } from './components/StatusBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { OfflineNotice } from './components/OfflineNotice';
-import { CostDashboard } from './components/CostDashboard';
 import { useCamera } from './hooks/useCamera';
 import { useMicrophone } from './hooks/useMicrophone';
 import { useMultimodalChat } from './hooks/useMultimodalChat';
@@ -28,6 +27,7 @@ function friendlyError(err: any): string {
   const msg: string = err?.message || err?.error?.message || String(err || '');
   if (!msg || msg === 'unknown' || msg === '[object Object]') return ERR_DEFAULT;
   if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) return ERR_NETWORK;
+  if (msg.includes('aborted') || msg.includes('BodyStreamBuffer') || msg.includes('AbortError')) return '请求超时，请检查网络后重试';
   if (msg.includes('401') || msg.includes('API key') || msg.includes('api key') || msg.includes('ApiKey') || msg.includes('API Key')) return ERR_401;
   if (msg.includes('402')) return 'API 余额不足，请充值';
   if (msg.includes('403')) return '权限不足，请检查 API Key';
@@ -142,7 +142,7 @@ const App: React.FC = () => {
     const modes: CostMode[] = ['off', 'balanced', 'aggressive'];
     const idx = modes.indexOf(chat.session.settings.costSaveMode);
     const next = modes[(idx + 1) % modes.length]!;
-    chat.updateSettings({ costSaveMode: next }); chat.updateCostMetrics({ currentMode: next });
+    chat.updateSettings({ costSaveMode: next }); 
   }, [chat.session.settings.costSaveMode, chat]);
   const handleSleep = useCallback(() => { camera.stopCamera(); mic.stopMicrophone(); setPhase('permission'); }, [camera, mic]);
 
@@ -208,9 +208,6 @@ const App: React.FC = () => {
               <span className="font-medium mr-1">错误:</span>{error}
             </div>
           )}
-          <div className="mt-2">
-            <CostDashboard costMetrics={chat.costMetrics} />
-          </div>
         </div>
         <div className="flex-1 flex flex-col min-h-0 border-l border-gray-800">
           <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
@@ -225,7 +222,7 @@ const App: React.FC = () => {
         </div>
       </div>
       <StatusBar cameraEnabled={camera.enabled} micEnabled={mic.enabled} isRecording={isRecording} isSpeaking={isSpeaking}
-        isProcessing={chat.isProcessing} costMetrics={chat.costMetrics}
+        isProcessing={chat.isProcessing} currentMode={chat.session.settings.costSaveMode}
         onToggleCamera={handleToggleCamera} onToggleMic={handleToggleMic}
         onToggleSettings={() => setShowSettings(true)} onToggleCostMode={handleToggleCostMode} />
       <SettingsPanel settings={chat.session.settings} visible={showSettings} onClose={() => setShowSettings(false)}

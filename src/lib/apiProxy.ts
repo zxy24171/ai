@@ -124,7 +124,7 @@ function buildMessages(messages: Message[], latestImages?: string[], model?: str
 export async function* streamChat(
   messages: Message[],
   options: ChatRequestOptions & { costMode?: CostMode }
-): AsyncGenerator<string, { fullText: string; model: string; usage: { prompt: number; completion: number } | null }> {
+): AsyncGenerator<string, { fullText: string; model: string }> {
   const apiConfig = getAPIConfig(options.costMode ?? 'balanced');
   const apiKey = apiConfig.apiKey;
   if (!apiKey) {
@@ -150,7 +150,7 @@ export async function* streamChat(
       stream: true,
       max_tokens: 512,
     }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!response.ok) {
@@ -162,7 +162,6 @@ export async function* streamChat(
   const decoder = new TextDecoder();
   let fullText = '';
   let buffer = '';
-  let usage: { prompt: number; completion: number } | null = null;
   let model = apiConfig.model;
 
   while (true) {
@@ -187,14 +186,12 @@ export async function* streamChat(
           yield choice.delta.content;
         }
         if (parsed.model) model = parsed.model;
-        if (parsed.usage) {
-          usage = { prompt: parsed.usage.prompt_tokens, completion: parsed.usage.completion_tokens };
-        }
+
       } catch { /* skip parse errors */ }
     }
   }
 
-  return { fullText, model, usage };
+  return { fullText, model };
 }
 
 export async function transcribeAudio(_audioBlob: Blob): Promise<string> {
@@ -232,15 +229,4 @@ export async function warmupAPI(): Promise<void> {
   } catch {
     // Silently ignore warmup failures
   }
-}
-export function estimateCost(promptTokens: number, completionTokens: number, model: string): number {
-  // DeepSeek pricing (approximate):
-  // deepseek-chat: .27/M input tokens, .10/M output tokens
-  const rates: Record<string, { input: number; output: number }> = {
-    'doubao-seed-2-0-pro-260215': { input: 0.80 / 1_000_000, output: 2.00 / 1_000_000 },
-    'deepseek-chat': { input: 0.27 / 1_000_000, output: 1.10 / 1_000_000 },
-    'deepseek-reasoner': { input: 0.55 / 1_000_000, output: 2.19 / 1_000_000 },
-  };
-  const rate = rates[model] ?? rates['deepseek-chat']!;
-  return promptTokens * rate.input + completionTokens * rate.output;
 }
