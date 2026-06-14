@@ -1,5 +1,5 @@
 ﻿import { useCallback, useState } from 'react';
-import { streamChat, estimateCost, getAPIConfig, supportsVision, isVisionConfigured, describeImagesWithVision } from '../lib/apiProxy';
+import { streamChat, getAPIConfig, supportsVision, isVisionConfigured, describeImagesWithVision } from '../lib/apiProxy';
 import { buildSystemPrompt } from '../lib/promptTemplates';
 import { interruptSpeech } from '../lib/speechInterrupt';
 import { onUserActivity } from '../lib/autoSleep';
@@ -9,7 +9,7 @@ import type { CostMode, Message } from '../types';
 import { useSession } from './useSession';
 
 export function useMultimodalChat() {
-  const { session, costMetrics, addMessage, updateLastMessage, updateTokenUsage, updateSettings, updateCostMetrics, clearSession } = useSession();
+  const { session, addMessage, updateLastMessage, updateSettings, clearSession } = useSession();
   const [isProcessing, setIsProcessing] = useState(false);
   const [streamingText, setStreamingText] = useState("");
 
@@ -53,19 +53,15 @@ export function useMultimodalChat() {
 
       let fullText = "";
       let resultModel = "";
-      let resultUsage: { prompt: number; completion: number } | null = null;
-
+      
       // Always send images to the vision model
       const gen = streamChat(chatMessages, { images: modelCanSee ? filteredImages : undefined, costMode });
       for await (const delta of gen) { fullText += delta; setStreamingText(fullText); }
-      const finalResult = await gen.return(undefined as any);
-      const finalValue: any = finalResult.value;
-      if (finalValue) { resultModel = finalValue.model; resultUsage = finalValue.usage; }
+      const finalValue: any = (await gen.return(undefined as any)).value;
+      if (finalValue) { resultModel = finalValue.model; }
 
       if (fullText) {
-        const tokenCost = resultUsage ? estimateCost(resultUsage.prompt, resultUsage.completion, resultModel) : 0;
-        addMessage({ role: "assistant", content: fullText, tokenCost, model: resultModel || undefined });
-        updateTokenUsage((resultUsage?.prompt ?? 0) + (resultUsage?.completion ?? 0), tokenCost);
+        addMessage({ role: "assistant", content: fullText, model: resultModel || undefined });
       }
 
       return fullText;
@@ -88,9 +84,9 @@ export function useMultimodalChat() {
       setStreamingText("");
       throw err;
     }
-  }, [isProcessing, session, addMessage, updateLastMessage, updateTokenUsage]);
+  }, [isProcessing, session, addMessage, updateLastMessage]);
 
   const abort = useCallback(() => { interruptSpeech(); setIsProcessing(false); setStreamingText(""); }, []);
 
-  return { messages: session.messages, isProcessing, streamingText, costMetrics, session, sendMessage, abort, clearSession, updateSettings, updateCostMetrics };
+  return { messages: session.messages, isProcessing, streamingText, session, sendMessage, abort, clearSession, updateSettings };
 }
