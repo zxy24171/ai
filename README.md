@@ -13,10 +13,10 @@ A real-time AI conversation app that runs entirely in the browser. Uses your cam
 - **Multi-modal AI** — Text + image understanding via Doubao API
 - **Two-message structure** — Question text and camera frame sent as separate messages to prevent AI from prioritizing images over conversation
 - **Automatic retry** — Retries on empty API response to handle intermittent failures
-- **API timeout** — 15-second timeout prevents hanging requests
+- **API timeout** — 30-second timeout prevents hanging requests
 - **API warmup** — Pre-warms the API connection on app start
 - **STT/TTS warmup** — Preloads SpeechRecognition and SpeechSynthesis to avoid cold-start latency
-- **Cost control** — Three modes (Off / Balanced / Eco) to manage API usage
+- **Cost control** — Three modes (Off / Balanced / Eco) to manage frame rate and resolution
 - **Conversation history** — Scrollable chat log with auto-scroll
 - **Motion detection** — Only sends frames when the scene changes
 - **Frame deduplication** — Skips duplicate frames to save tokens
@@ -44,14 +44,18 @@ All in package.json: react, react-dom, tailwindcss, postcss, autoprefixer, vite,
 
 No external AI SDKs or audio processing libraries required — everything uses built-in browser APIs.
 
-## Original Work
+## Project Structure
 
-All source code is original. Key original modules:
-- Custom React hooks for camera, microphone, session, multimodal chat
-- Real-time frame capture with motion detection and deduplication
-- Browser-native STT/TTS integration with warmup and retry
-- Manual API proxy for streaming chat completions with timeout handling
-- Cost management with dynamic frame rate / resolution control
+```
+src/
+  components/    — React UI components (CameraPreview, ChatMessageList, StatusBar, SettingsPanel, PermissionGate, ErrorBoundary, OfflineNotice)
+  hooks/         — Custom React hooks (useCamera, useMicrophone, useMultimodalChat, useSession)
+  lib/           — Utility modules (apiProxy, audioCapture, audioPlayer, autoSleep, costConfig, frameCapture, frameDedup, motionDetect, networkDetect, promptTemplates, speechInterrupt, sttService, ttsService, vadDetect)
+  types/         — TypeScript type definitions
+  App.tsx        — Main application component
+  main.tsx       — Entry point
+  index.css      — Global styles
+```
 
 ## Setup
 
@@ -82,24 +86,10 @@ npm run dev
 ## Usage
 
 1. Allow camera and microphone when prompted
-2. Hold the mic button and speak
-3. Release to send voice as a message
-4. AI responds with voice and text
-5. Use text input as alternative
-6. Toggle camera/mic via the status bar
-7. Open Settings to adjust resolution, frame interval, cost mode
-
-## Project Structure
-
-```
-src/
-  components/    — React UI components
-  hooks/         — Custom React hooks
-  lib/           — Utility modules (STT, TTS, camera, VAD, …)
-  types/         — TypeScript type definitions
-  App.tsx        — Main application component
-  main.tsx       — Entry point
-```
+2. Hold the mic button and speak, or type in the text input
+3. AI responds with voice and text
+4. Toggle camera/mic via the status bar
+5. Open Settings to adjust resolution, frame interval, cost mode
 
 ## License
 
