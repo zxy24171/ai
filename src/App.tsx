@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionGate } from './components/PermissionGate';
 import { CameraPreview } from './components/CameraPreview';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -133,7 +133,7 @@ const App: React.FC = () => {
     const modes: CostMode[] = ['off', 'balanced', 'aggressive'];
     const idx = modes.indexOf(chat.session.settings.costSaveMode);
     const next = modes[(idx + 1) % modes.length]!;
-    chat.updateSettings({ costSaveMode: next });
+    chat.updateSettings({ costSaveMode: next }); chat.updateCostMetrics({ currentMode: next });
   }, [chat.session.settings.costSaveMode, chat]);
   const handleSleep = useCallback(() => { camera.stopCamera(); mic.stopMicrophone(); setPhase('permission'); }, [camera, mic]);
 
